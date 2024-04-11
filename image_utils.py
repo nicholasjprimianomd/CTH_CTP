@@ -7,50 +7,63 @@ import SimpleITK as sitk
 from tqdm.notebook import tqdm
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
-from ipywidgets import Dropdown, IntSlider, interactive_output, VBox
+from ipywidgets import Dropdown, IntSlider, interactive_output, VBox, Checkbox
 from IPython.display import display
-
+import re
 
 class ImageVisualizer:
     def __init__(self, prediction_dir, ground_truth_dir, ct_images_dir):
         self.prediction_dir = prediction_dir
         self.ground_truth_dir = ground_truth_dir
         self.ct_images_dir = ct_images_dir
-        self.common_files = sorted([f for f in os.listdir(prediction_dir) if f.endswith('.nii') or f.endswith('.nii.gz')])
+        
+        # Extract base names for the dropdown options
+        file_names = os.listdir(prediction_dir)
+        base_names = set(f.split('.')[0].rsplit('_', 1)[0] for f in file_names if f.endswith('.nii') or f.endswith('.nii.gz'))
+        self.common_files = sorted(list(base_names))
         
         self.file_name_widget = Dropdown(options=self.common_files)
-        self.slice_idx_widget = IntSlider(min=0, max=1, step=1, value=0)
+        self.slice_idx_widget = IntSlider(min=0, max=1, step=1, value=0, description='Slice Index')
+        self.window_level_widget = IntSlider(min=-1000, max=1000, step=1, value=40, description='Window Level')
+        self.window_width_widget = IntSlider(min=-1000, max=2000, step=1, value=80, description='Window Width')
+        self.overlay_toggle = Checkbox(value=True, description='Show Overlay')
         self.file_name_widget.observe(self.update_slice_idx_range, 'value')
-        
+
         self.update_slice_idx_range()  # Initial call to set slice index range
 
-    def apply_window(self, image, level=40, width=80):
+    def apply_window(self, image, level, width):
         lower = level - (width / 2)
         upper = level + (width / 2)
         return np.clip((image - lower) / (upper - lower), 0, 1)
 
-    def plot_images(self, file_name, slice_idx):
-        # Construct file paths
-        prediction_file_path = os.path.join(self.prediction_dir, file_name)
-        ground_truth_file_path = os.path.join(self.ground_truth_dir, file_name)
-        ct_image_file_path = os.path.join(self.ct_images_dir, file_name)
+    def find_matching_file(self, dir, base_name):
+        """Find a file in `dir` that matches `base_name`."""
+        for f in sorted(os.listdir(dir)):
+            if f.startswith(base_name) and (f.endswith('.nii') or f.endswith('.nii.gz')):
+                return os.path.join(dir, f)
+        return None
 
-        # Load the files
-        prediction_img = nib.load(prediction_file_path)
-        ground_truth_img = nib.load(ground_truth_file_path)
-        ct_img = nib.load(ct_image_file_path)
+    def plot_images(self, base_name, slice_idx, window_level, window_width, show_overlay):
+        # Find corresponding files
+        prediction_file_path = self.find_matching_file(self.prediction_dir, base_name)
+        ground_truth_file_path = self.find_matching_file(self.ground_truth_dir, base_name)
+        ct_image_file_path = self.find_matching_file(self.ct_images_dir, base_name)
 
-        # Convert the data to numpy arrays
-        prediction_data = prediction_img.get_fdata()
-        ground_truth_data = ground_truth_img.get_fdata()
-        ct_data = ct_img.get_fdata()
+        if not all([prediction_file_path, ground_truth_file_path, ct_image_file_path]):
+            print("One or more files could not be found for the patient:", base_name)
+            return
+
+        # Load and convert the data to numpy arrays
+        prediction_data = nib.load(prediction_file_path).get_fdata()
+        ground_truth_data = nib.load(ground_truth_file_path).get_fdata()
+        ct_data = nib.load(ct_image_file_path).get_fdata()
 
         # Adjust slice_idx if it's out of bounds for any of the images
         max_slices = min(prediction_data.shape[2], ground_truth_data.shape[2], ct_data.shape[2])
         slice_idx = min(slice_idx, max_slices - 1)
 
-        # Apply custom windowing to the CT head image
-        ct_data_windowed = self.apply_window(ct_data)
+        # Apply windowing to the CT head image
+        ct_data_windowed = self.apply_window(ct_data[:, :, slice_idx], window_level, window_width)
 
         # Plot the images
         fig, axes = plt.subplots(1, 3, figsize=(20, 5))
@@ -58,23 +71,36 @@ class ImageVisualizer:
         axes[0].set_title('Ground Truth Image')
         axes[1].imshow(prediction_data[:, :, slice_idx], cmap='gray')
         axes[1].set_title('Prediction')
-        axes[2].imshow(ct_data_windowed[:, :, slice_idx], cmap='gray')
-        axes[2].imshow(ground_truth_data[:, :, slice_idx], cmap='hot', alpha=0.5)
+        axes[2].imshow(ct_data_windowed, cmap='gray')
+        if show_overlay:
+            axes[2].imshow(ground_truth_data[:, :, slice_idx], cmap='hot', alpha=0.5)
         axes[2].set_title('CT with Ground Truth Overlay')
         plt.show()
 
     def update_slice_idx_range(self, *args):
-        ct_img = nib.load(os.path.join(self.ct_images_dir, self.file_name_widget.value))
-        ct_data = ct_img.get_fdata()
-        self.slice_idx_widget.max = ct_data.shape[2] - 1
-        self.slice_idx_widget.value = min(self.slice_idx_widget.value, self.slice_idx_widget.max)
+        base_name = self.file_name_widget.value
+        ct_image_file_path = self.find_matching_file(self.ct_images_dir, base_name)
+
+        if ct_image_file_path:
+            ct_img = nib.load(ct_image_file_path)
+            ct_data = ct_img.get_fdata()
+            self.slice_idx_widget.max = ct_data.shape[2] - 1
+            self.slice_idx_widget.value = min(self.slice_idx_widget.value, self.slice_idx_widget.max)
+        else:
+            print("CT image file could not be found for the patient:", base_name)
 
     def display(self):
-        # Link widgets to plot function without auto-creating them
-        out = interactive_output(self.plot_images, {'file_name': self.file_name_widget, 'slice_idx': self.slice_idx_widget})
+        # Link widgets to plot function
+        out = interactive_output(self.plot_images, {
+            'base_name': self.file_name_widget, 
+            'slice_idx': self.slice_idx_widget, 
+            'window_level': self.window_level_widget, 
+            'window_width': self.window_width_widget, 
+            'show_overlay': self.overlay_toggle
+        })
         
-        # Display the manual widgets and the output together
-        display(VBox([self.file_name_widget, self.slice_idx_widget, out]))
+        # Display the widgets and the output together
+        display(VBox([self.file_name_widget, self.slice_idx_widget, self.window_level_widget, self.window_width_widget, self.overlay_toggle, out]))
 
 
 def quantize_maps(source_dir, target_dir, quantization_levels=5):
@@ -137,3 +163,58 @@ def convert_series_to_nifti(input_directory, output_file):
 
     # Write the processed image as a NIfTI file
     sitk.WriteImage(processed_image, output_file)
+
+
+def convert_nii_to_niigz(input_dir, output_dir=None):
+    """
+    Converts all .nii files in the input directory to .nii.gz format.
+
+    Parameters:
+    - input_dir: The directory containing .nii files.
+    - output_dir: Optional. The directory where .nii.gz files will be saved. If None, saves in the input directory.
+    """
+    if output_dir is None:
+        output_dir = input_dir
+    else:
+        # Ensure the output directory exists
+        os.makedirs(output_dir, exist_ok=True)
+
+    for file_name in tqdm(os.listdir(input_dir)):
+        if file_name.endswith('.nii'):
+            # Construct the full file path for the .nii file
+            file_path = os.path.join(input_dir, file_name)
+            # Load the .nii file
+            nii_image = nib.load(file_path)
+            # Construct the output file path with .nii.gz extension
+            output_file_path = os.path.join(output_dir, file_name + '.gz')
+            # Save the image in .nii.gz format
+            nib.save(nii_image, output_file_path)
+            print(f'Converted and saved: {output_file_path}')
+
+
+def convert_niigz_to_nii(input_dir, output_dir=None):
+    """
+    Converts all .nii.gz files in the input directory to .nii format.
+
+    Parameters:
+    - input_dir: The directory containing .nii.gz files.
+    - output_dir: Optional. The directory where .nii files will be saved. If None, saves in the input directory.
+    """
+    if output_dir is None:
+        output_dir = input_dir
+    else:
+        # Ensure the output directory exists
+        os.makedirs(output_dir, exist_ok=True)
+
+    for file_name in tqdm(os.listdir(input_dir)):
+        if file_name.endswith('.nii.gz'):
+            # Construct the full file path for the .nii.gz file
+            file_path = os.path.join(input_dir, file_name)
+            # Load the .nii.gz file
+            niigz_image = nib.load(file_path)
+            # Construct the output file path with .nii extension
+            # Removing the '.gz' extension from the file name
+            output_file_path = os.path.join(output_dir, file_name[:-3])
+            # Save the image in .nii format
+            nib.save(niigz_image, output_file_path)
+            print(f'Converted and saved: {output_file_path}')
