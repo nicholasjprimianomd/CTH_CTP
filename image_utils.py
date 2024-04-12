@@ -10,6 +10,7 @@ import matplotlib.pyplot as plt
 from ipywidgets import Dropdown, IntSlider, interactive_output, VBox, Checkbox
 from IPython.display import display
 import re
+import glob
 
 class ImageVisualizer:
     def __init__(self, prediction_dir, ground_truth_dir, ct_images_dir):
@@ -191,6 +192,47 @@ def convert_nii_to_niigz(input_dir, output_dir=None):
             nib.save(nii_image, output_file_path)
             print(f'Converted and saved: {output_file_path}')
 
+def delete_niigz_files(directory):
+    """
+    Deletes all files with the .nii.gz extension in the specified directory.
+
+    Args:
+    directory (str): The path to the directory where the files are located.
+    """
+    # Create the full path pattern to find .nii.gz files
+    pattern = os.path.join(directory, '**', '*.nii.gz')
+    
+    # Use glob to find all files matching the pattern
+    files = glob.glob(pattern, recursive=True)
+    
+    # Iterate over the list of file paths
+    for file_path in files:
+        try:
+            os.remove(file_path)  # Attempt to remove the file
+            print(f'Deleted: {file_path}')  # Print confirmation of deletion
+        except Exception as e:
+            print(f'Failed to delete {file_path}: {e}')  # Print any error messages
+
+def delete_nii_files(directory):
+    """
+    Deletes all files with the .nii extension in the specified directory.
+
+    Args:
+    directory (str): The path to the directory where the files are located.
+    """
+    # Create the full path pattern to find .nii files
+    pattern = os.path.join(directory, '**', '*.nii')
+    
+    # Use glob to find all files matching the pattern
+    files = glob.glob(pattern, recursive=True)
+    
+    # Iterate over the list of file paths
+    for file_path in files:
+        try:
+            os.remove(file_path)  # Attempt to remove the file
+            print(f'Deleted: {file_path}')  # Print confirmation of deletion
+        except Exception as e:
+            print(f'Failed to delete {file_path}: {e}') 
 
 def convert_niigz_to_nii(input_dir, output_dir=None):
     """
