@@ -8,7 +8,7 @@ from tqdm.notebook import tqdm
 from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
 from ipywidgets import Dropdown, IntSlider, interactive_output, VBox, Checkbox
-from IPython.display import display
+from IPython.display import display, Image
 import re
 import glob
 
@@ -260,3 +260,7 @@ def convert_niigz_to_nii(input_dir, output_dir=None):
             # Save the image in .nii format
             nib.save(niigz_image, output_file_path)
             print(f'Converted and saved: {output_file_path}')
+            
+def show_progress(image_path):
+
+    display(Image(filename=image_path))
